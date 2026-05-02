@@ -1,0 +1,7 @@
+*.bin
+*.gguf
+*.ggml
+build/
+__pycache__/
+*.pyc
+.env
