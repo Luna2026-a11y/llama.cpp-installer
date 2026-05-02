@@ -1,27 +1,29 @@
+🇫🇷 [Français](README.fr.md) | 🇬🇧 **English**
+
 # llama.cpp Installer
 
-Script d'installation automatique de llama.cpp avec support CUDA pour Ubuntu/Pop!_OS.
+Automatic installation script for llama.cpp with CUDA support for Ubuntu/Pop!_OS.
 
-> **Compatibilité** : Linux uniquement. Testé sous Pop!_OS 24.04.
+> **Compatibility**: Linux only. Tested on Pop!_OS 24.04.
 
-## Ce que fait le script
+## What the script does
 
-- Met à jour le système
-- Installe les dépendances (git, cmake, build-essential, etc.)
-- Optionnel : installe le CUDA Toolkit pour les GPU NVIDIA
-- Clone ou met à jour le dépôt llama.cpp
-- Compile llama.cpp avec cmake (incluant `llama-server`)
-- Optionnel : ajoute `llama-server` au PATH
-- Optionnel : télécharge un modèle exemple (Llama 2 7B)
+- Updates the system
+- Installs dependencies (git, cmake, build-essential, etc.)
+- Optional: installs CUDA Toolkit for NVIDIA GPUs
+- Clones or updates the llama.cpp repository
+- Compiles llama.cpp with cmake (including `llama-server`)
+- Optional: adds `llama-server` to your PATH
+- Optional: downloads a sample model (Llama 2 7B)
 
-## Utilisation
+## Usage
 
 ```bash
 chmod +x install.sh
 ./install.sh
 ```
 
-## Exécuter un modèle (Qwen3.6-35B-A3B)
+## Running a model (Qwen3.6-35B-A3B)
 
 ```bash
 llama-server \
@@ -43,24 +45,28 @@ llama-server \
   --chat-template-kwargs '{"preserve_thinking": true}'
 ```
 
-## Tester le serveur
+## Documentation
+
+Full documentation of llama.cpp parameters and internals: [DOC.md](DOC.md)
+
+## Testing the server
 
 ```bash
 curl http://localhost:8001/health
 ```
 
-## Exemple API Python
+## Python API example
 
 ```python
 import requests
 
 response = requests.post(
     'http://localhost:8001/chat',
-    json={'messages': [{'role': 'user', 'content': 'Bonjour !'}]}
+    json={'messages': [{'role': 'user', 'content': 'Hello!'}]}
 )
 print(response.json())
 ```
 
-## Auteur
+## Author
 
 Issa Issa

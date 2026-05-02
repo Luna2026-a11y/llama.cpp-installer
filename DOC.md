@@ -1,396 +1,398 @@
-# Documentation llama.cpp — Paramètres et Fonctionnement
+🇫🇷 [Français](DOC.fr.md) | 🇬🇧 **English**
 
-> Référence complète des options de ligne de commande de `llama-server` et du moteur `llama.cpp`.
+# llama.cpp Documentation — Parameters & Internals
 
----
-
-## Sommaire
-
-1. [Architecture générale](#architecture-générale)
-2. [Paramètres de modèle](#paramètres-de-modèle)
-3. [Paramètres de contexte](#paramètres-de-contexte)
-4. [Paramètres GPU / CUDA](#paramètres-gpu--cuda)
-5. [Paramètres MoE (Mixture of Experts)](#paramètres-moe-mixture-of-experts)
-6. [Paramètres de cache KV](#paramètres-de-cache-kv)
-7. [Paramètres de sampling / génération](#paramètres-de-sampling--génération)
-8. [Paramètres serveur](#paramètres-serveur)
-9. [Paramètres de performance](#paramètres-de-performance)
-10. [Fonctionnement interne](#fonctionnement-interne)
-11. [Cas pratique : Qwen3.6-35B-A3B](#cas-pratique--qwen36-35b-a3b)
-12. [Dépannage](#dépannage)
+> Complete reference for `llama-server` command-line options and the `llama.cpp` engine.
 
 ---
 
-## Architecture générale
+## Table of Contents
 
-### Comment fonctionne llama.cpp
+1. [General Architecture](#general-architecture)
+2. [Model Parameters](#model-parameters)
+3. [Context Parameters](#context-parameters)
+4. [GPU / CUDA Parameters](#gpu--cuda-parameters)
+5. [MoE Parameters (Mixture of Experts)](#moe-parameters-mixture-of-experts)
+6. [KV Cache Parameters](#kv-cache-parameters)
+7. [Sampling / Generation Parameters](#sampling--generation-parameters)
+8. [Server Parameters](#server-parameters)
+9. [Performance Parameters](#performance-parameters)
+10. [Internal Mechanics](#internal-mechanics)
+11. [Practical Example: Qwen3.6-35B-A3B](#practical-example-qwen36-35b-a3b)
+12. [Troubleshooting](#troubleshooting)
 
-`llama.cpp` est un moteur d'inférence LLM écrit en C/C++, optimisé pour tourner sur du matériel grand public. Il ne fait pas d'entraînement — il ne fait que de l'inférence (génération de texte).
+---
 
-Le flux de données :
+## General Architecture
+
+### How llama.cpp Works
+
+`llama.cpp` is a C/C++ LLM inference engine optimized for consumer hardware. It does no training — only inference (text generation).
+
+Data flow:
 
 ```
-Fichier GGUF → Chargement en mémoire → Déquantification par couche → Inférence → Tokens générés
+GGUF file → Load into memory → Per-layer dequantization → Inference → Generated tokens
 ```
 
-### Deux exécutables principaux
+### Two main executables
 
-| Binaire | Rôle |
-|---------|------|
-| `llama-server` | Serveur HTTP avec API compatible OpenAI (`/v1/chat/completions`) |
-| `llama-cli` | Interface CLI interactive pour le chat en terminal |
+| Binary | Role |
+|--------|------|
+| `llama-server` | HTTP server with OpenAI-compatible API (`/v1/chat/completions`) |
+| `llama-cli` | Interactive CLI for terminal chat |
 
-### Le format GGUF
+### The GGUF Format
 
-GGUF (GPT-Generated Unified Format) est le format de modèle de llama.cpp. Il contient :
-- Les poids du modèle (quantifiés en Q4, Q5, Q8, etc.)
-- Les métadonnées (tokenizer, hyperparamètres, template de chat)
-- Les tensors organisés par couche
+GGUF (GPT-Generated Unified Format) is llama.cpp's model format. It contains:
+- Model weights (quantized at Q4, Q5, Q8, etc.)
+- Metadata (tokenizer, hyperparameters, chat template)
+- Tensors organized by layer
 
-Les niveaux de quantification courants :
+Common quantization levels:
 
-| Quant | Taille approx. | Qualité | Usage recommandé |
-|-------|---------------|---------|------------------|
-| `Q3_K_M` | Plus petit | Bonne | RAM très limitée |
-| `Q4_K_M` | ~40% du FP16 | Très bon | Sweet spot pour les GPU 12GB |
-| `Q4_K_XL` | Un peu plus gros | Meilleur | GPU avec plus de VRAM |
-| `Q5_K_M` | ~55% du FP16 | Excellent | Quand la VRAM le permet |
-| `Q6_K` | ~65% du FP16 | Quasi-original | Presque sans perte |
-| `Q8_0` | ~75% du FP16 | Quasi-parfait | Quantification quasi-transparente |
-| `UD-Q4_K_XL` | Variable | Unsloth Dynamic | Quantification adaptative (meilleur rapport poids/qualité) |
+| Quant | Approx. Size | Quality | Recommended Use |
+|-------|-------------|---------|-----------------|
+| `Q3_K_M` | Smallest | Good | Very limited RAM |
+| `Q4_K_M` | ~40% of FP16 | Very good | Sweet spot for 12GB GPUs |
+| `Q4_K_XL` | Slightly larger | Better | GPUs with more VRAM |
+| `Q5_K_M` | ~55% of FP16 | Excellent | When VRAM allows |
+| `Q6_K` | ~65% of FP16 | Near-original | Almost lossless |
+| `Q8_0` | ~75% of FP16 | Near-perfect | Virtually transparent quantization |
+| `UD-Q4_K_XL` | Variable | Unsloth Dynamic | Adaptive quantization (best size/quality ratio) |
 
-> **Note** : Les quantifications `UD-*` (Unsloth Dynamic) sont des quantifications adaptatives qui ajustent le niveau de précision par tensor, offrant un meilleur rapport qualité/taille que les quantifications uniformes.
+> **Note**: `UD-*` (Unsloth Dynamic) quantizations adjust precision per-tensor, offering better quality/size ratios than uniform quantizations.
 
 ---
 
-## Paramètres de modèle
+## Model Parameters
 
-### `-m, --model <chemin>` — Chemin vers le fichier GGUF
+### `-m, --model <path>` — Path to the GGUF file
 
-Le chemin vers le fichier modèle quantifié.
+Path to the quantized model file.
 
 ```bash
 -m models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf
 ```
 
-### `--alias <nom>` — Alias pour le modèle
+### `--alias <name>` — Model alias
 
-Nom d'affichage utilisé dans l'API et les logs. Pratique quand on lance plusieurs modèles.
+Display name used in the API and logs. Handy when running multiple models.
 
 ```bash
 --alias qwen35b
 ```
 
-Dans l'API, le modèle sera référencé comme `qwen35b` au lieu du chemin complet.
+In the API, the model will be referenced as `qwen35b` instead of the full path.
 
 ---
 
-## Paramètres de contexte
+## Context Parameters
 
-### `-c, --ctx-size <n>` — Taille du contexte (tokens)
+### `-c, --ctx-size <n>` — Context size (tokens)
 
-Le nombre maximum de tokens que le modèle peut "voir" en mémoire. C'est la fenêtre de contexte.
+Maximum number of tokens the model can "see" in memory. This is the context window.
 
 ```bash
 -c 131072   # 128k tokens
 -c 32768    # 32k tokens
--c 8192     # 8k tokens (défaut)
+-c 8192     # 8k tokens (default)
 ```
 
-**Impact** :
-- Plus de contexte = plus de VRAM/RAM consommée par le cache KV
-- 128k context = ~8 GB de cache KV en Q8_0 pour un 35B MoE
-- La vitesse de préremplissage (prompt processing) diminue avec la taille du contexte
+**Impact**:
+- More context = more VRAM/RAM consumed by the KV cache
+- 128k context = ~8 GB of KV cache in Q8_0 for a 35B MoE
+- Prompt processing speed decreases as context size grows
 
-### `-n, --predict <n>` — Nombre maximum de tokens à générer
+### `-n, --predict <n>` — Maximum tokens to generate
 
-Limite haute pour la génération. Le modèle peut s'arrêter avant s'il rencontre un token de fin.
+Upper limit for generation. The model may stop earlier if it encounters an end token.
 
 ```bash
--n 32768    # Générer jusqu'à 32k tokens
+-n 32768    # Generate up to 32k tokens
 ```
 
-### `--no-context-shift` — Désactiver le glissement de contexte
+### `--no-context-shift` — Disable context shifting
 
-Par défaut, quand le contexte est plein, llama.cpp peut glisser la fenêtre (retirer les tokens les plus anciens) pour continuer la conversation. Ce flag désactive ce comportement.
+By default, when the context is full, llama.cpp can slide the window (removing the oldest tokens) to continue the conversation. This flag disables that behavior.
 
-**Quand l'utiliser** : Quand vous voulez que le modèle respecte strictement la taille de contexte définie, sans tronquer silencieusement l'historique.
+**When to use it**: When you want the model to strictly respect the defined context size, without silently truncating history.
 
 ---
 
-## Paramètres GPU / CUDA
+## GPU / CUDA Parameters
 
-### `-ngl, --n-gpu-layers <n>` — Nombre de couches sur le GPU
+### `-ngl, --n-gpu-layers <n>` — Number of layers on GPU
 
-Définit combien de couches du modèle sont déplacées vers la VRAM du GPU. `999` = toutes les couches.
+Defines how many model layers are moved to GPU VRAM. `999` = all layers.
 
 ```bash
--ngl 999    # Tout sur le GPU (recommandé si VRAM suffisante)
--ngl 0      # Tout sur le CPU (très lent)
--ngl 20     # Seulement 20 couches sur GPU (Partial offloading)
+-ngl 999    # Everything on GPU (recommended if VRAM allows)
+-ngl 0      # Everything on CPU (very slow)
+-ngl 20     # Only 20 layers on GPU (Partial offloading)
 ```
 
-**Impact** :
-- Plus de couches sur GPU = plus rapide, mais plus de VRAM
-- Si tout tient en VRAM, utilisez `-ngl 999`
-- Si VRAM insuffisante, réduisez progressivement jusqu'à ce que ça tienne
+**Impact**:
+- More GPU layers = faster, but more VRAM needed
+- If everything fits in VRAM, use `-ngl 999`
+- If insufficient VRAM, reduce progressively until it fits
 
-### `-sm, --split-mode <mode>` — Mode de répartition multi-GPU
+### `-sm, --split-mode <mode>` — Multi-GPU split mode
 
 | Mode | Description |
 |------|-------------|
-| `row` | Répartition par lignes (défaut) — équilibre entre les GPUs |
-| `layer` | Répartition par couches — chaque GPU gère des couches entières |
+| `row` | Row-based split (default) — balances between GPUs |
+| `layer` | Layer-based split — each GPU handles whole layers |
 
-Utile uniquement avec plusieurs GPUs NVIDIA.
+Only useful with multiple NVIDIA GPUs.
 
 ---
 
-## Paramètres MoE (Mixture of Experts)
+## MoE Parameters (Mixture of Experts)
 
-### `-ncmoe, --n-cmoe-offload <n>` — Nombre d'experts MoE sur le GPU
+### `-ncmoe, --n-cmoe-offload <n>` — Number of MoE experts on GPU
 
-**C'est le paramètre clé pour les modèles MoE sur GPU limité.**
+**This is the key parameter for MoE models on limited GPUs.**
 
-Les modèles MoE (comme Qwen3.6-35B-A3B, Mixtral, DeepSeek) ont plusieurs "experts" par couche, mais n'en activent que quelques-uns par token. Le défi : tous les experts doivent être en mémoire pour choisir lesquels activer.
+MoE models (like Qwen3.6-35B-A3B, Mixtral, DeepSeek) have multiple "experts" per layer, but only activate a few per token. The challenge: all experts must be in memory to select which ones to activate.
 
-Le flag `-ncmoe` contrôle combien d'experts sont chargés sur le GPU :
+The `-ncmoe` flag controls how many experts are loaded on the GPU:
 
 ```bash
--ncmoe 25   # 25 experts sur GPU — sweet spot pour 12GB VRAM
--ncmoe 0    # Aucun expert MoE sur GPU (tous en RAM)
+-ncmoe 25   # 25 experts on GPU — sweet spot for 12GB VRAM
+-ncmoe 0    # No MoE experts on GPU (all in system RAM)
 ```
 
-**Comment ça marche** :
+**How it works**:
 
-1. Le modèle MoE a N experts par couche (e.g., 64 experts pour Qwen3.6)
-2. À chaque token, seuls quelques experts sont activés (e.g., 8 sur 64)
-3. Mais TOUS les experts doivent être accessibles pour la sélection
-4. `-ncmoe 25` garde les 25 premiers experts en VRAM, le reste en RAM système
-5. Les experts les plus fréquemment utilisés sont privilégiés sur le GPU
+1. The MoE model has N experts per layer (e.g., 64 for Qwen3.6)
+2. At each token, only a few experts are activated (e.g., 8 out of 64)
+3. But ALL experts must be accessible for selection
+4. `-ncmoe 25` keeps the first 25 experts in VRAM, the rest in system RAM
+5. Most frequently used experts are prioritized on the GPU
 
-**Impact sur les performances** :
+**Performance impact**:
 
-| Valeur | VRAM | Vitesse | Recommandation |
-|--------|------|---------|----------------|
-| `-ncmoe 0` | ~4 GB | 25-30 tok/s | GPU très limité |
+| Value | VRAM | Speed | Recommendation |
+|-------|------|-------|----------------|
+| `-ncmoe 0` | ~4 GB | 25-30 tok/s | Very limited GPU |
 | `-ncmoe 25` | ~6.5-10.6 GB | 58-62 tok/s | **RTX 4070 12GB** ★ |
 | `-ncmoe 50` | ~14 GB | 60-65 tok/s | RTX 4070 Ti 16GB |
-| Tous sur GPU | ~20+ GB | 65+ tok/s | RTX 4090 24GB |
+| All on GPU | ~20+ GB | 65+ tok/s | RTX 4090 24GB |
 
 ---
 
-## Paramètres de cache KV
+## KV Cache Parameters
 
-### `--cache-type-k <type>` — Type de quantification du cache KV (clés)
+### `--cache-type-k <type>` — KV cache quantization type (keys)
 
-### `--cache-type-v <type>` — Type de quantification du cache KV (valeurs)
+### `--cache-type-v <type>` — KV cache quantization type (values)
 
-Le cache KV (Key-Value) stocke les représentations intermédiaires des tokens déjà traités, pour ne pas les recalculer à chaque nouveau token.
+The KV (Key-Value) cache stores intermediate representations of already-processed tokens, so they don't need to be recomputed for each new token.
 
 ```bash
---cache-type-k q8_0   # Clés en Q8 (8-bit quantifié)
---cache-type-v q8_0   # Valeurs en Q8 (8-bit quantifié)
+--cache-type-k q8_0   # Keys quantized to Q8 (8-bit)
+--cache-type-v q8_0   # Values quantized to Q8 (8-bit)
 ```
 
-**Types disponibles** :
+**Available types**:
 
-| Type | Précision | VRAM | Cohérence long contexte |
-|------|-----------|------|--------------------------|
-| `f16` | Complète | 2x | Référence |
-| `q8_0` | 8-bit | 1x | Très bonne ★ |
-| `q4_0` | 4-bit | 0.5x | Dégradation notable |
-| `q4_1` | 4-bit amélioré | 0.5x | Acceptable |
+| Type | Precision | VRAM | Long context coherence |
+|------|-----------|------|------------------------|
+| `f16` | Full | 2x | Reference |
+| `q8_0` | 8-bit | 1x | Very good ★ |
+| `q4_0` | 4-bit | 0.5x | Notable degradation |
+| `q4_1` | Improved 4-bit | 0.5x | Acceptable |
 
-**Pourquoi Q8_0 est le sweet spot** :
-- Divise la VRAM du cache par 2 par rapport au FP16
-- Préserve suffisamment de précision pour les longs contextes (128k)
-- La dégradation est imperceptible en pratique
-- Q4_0 est trop agressif — le modèle perd en cohérence au-delà de 32k tokens
+**Why Q8_0 is the sweet spot**:
+- Halves KV cache VRAM compared to FP16
+- Preserves enough precision for long contexts (128k)
+- Degradation is imperceptible in practice
+- Q4_0 is too aggressive — the model loses coherence beyond 32k tokens
 
-**Impact sur 128k de contexte** :
-- FP16 : ~16 GB de cache KV → impossible en 12 GB VRAM
-- Q8_0 : ~8 GB de cache KV → tient dans 12 GB VRAM avec de la marge
-- Q4_0 : ~4 GB mais qualité dégradée
+**Impact on 128k context**:
+- FP16: ~16 GB KV cache → impossible with 12 GB VRAM
+- Q8_0: ~8 GB KV cache → fits in 12 GB VRAM with margin
+- Q4_0: ~4 GB but degraded quality
 
 ---
 
-## Paramètres de sampling / génération
+## Sampling / Generation Parameters
 
-### `--temp <valeur>` — Température
+### `--temp <value>` — Temperature
 
-Contrôle la "créativité" du modèle. Plus c'est bas, plus c'est déterministe.
-
-```bash
---temp 0.6   # Bon pour le coding — créatif mais cohérent
---temp 0.0   # Greedy decoding — toujours le même output
---temp 1.0   # Très aléatoire
-```
-
-**Valeurs recommandées** :
-- Coding/analyse : 0.3 - 0.6
-- Chat créatif : 0.7 - 0.9
-- Tâches déterministes : 0.0
-
-### `--top-p <valeur>` — Nucleus sampling
-
-Ne considère que les tokens dont la probabilité cumulée atteint ce seuil.
+Controls model "creativity". Lower is more deterministic.
 
 ```bash
---top-p 0.95   # Les tokens couvrant 95% de la probabilité
+--temp 0.6   # Good for coding — creative but coherent
+--temp 0.0   # Greedy decoding — always same output
+--temp 1.0   # Very random
 ```
 
-### `--top-k <valeur>` — Top-K sampling
+**Recommended values**:
+- Coding/analysis: 0.3 - 0.6
+- Creative chat: 0.7 - 0.9
+- Deterministic tasks: 0.0
 
-Ne considère que les K tokens les plus probables.
+### `--top-p <value>` — Nucleus sampling
+
+Only considers tokens whose cumulative probability reaches this threshold.
 
 ```bash
---top-k 20   # Seulement les 20 tokens les plus probables
+--top-p 0.95   # Tokens covering 95% of probability
 ```
 
-### `--repeat-penalty <valeur>` — Pénalité de répétition
+### `--top-k <value>` — Top-K sampling
 
-Augmente la pénalité pour les tokens déjà générés, évitant les boucles.
+Only considers the K most probable tokens.
 
 ```bash
---repeat-penalty 1.00   # Pas de pénalité (recommandé pour MoE avec thinking)
+--top-k 20   # Only the 20 most probable tokens
 ```
 
-> **Note** : Pour les modèles avec "thinking" (comme Qwen3), une pénalité de répétition à 1.0 est recommandée car le modèle gère naturellement la structure de sa pensée.
+### `--repeat-penalty <value>` — Repetition penalty
 
-### `--presence-penalty <valeur>` — Pénalité de présence
-
-Pénalise les tokens qui ont déjà apparu, encourageant la diversité.
+Increases penalty for already-generated tokens, preventing loops.
 
 ```bash
---presence-penalty 0.00   # Pas de pénalité supplémentaire
+--repeat-penalty 1.00   # No penalty (recommended for MoE with thinking)
 ```
 
-### `--chat-template-kwargs` — Arguments du template de chat
+> **Note**: For models with "thinking" (like Qwen3), a repetition penalty of 1.0 is recommended because the model naturally manages its thought structure.
 
-Paramètres supplémentaires passés au template de chat du modèle.
+### `--presence-penalty <value>` — Presence penalty
+
+Penalizes tokens that have already appeared, encouraging diversity.
+
+```bash
+--presence-penalty 0.00   # No additional penalty
+```
+
+### `--chat-template-kwargs` — Chat template arguments
+
+Additional parameters passed to the model's chat template.
 
 ```bash
 --chat-template-kwargs '{"preserve_thinking": true}'
 ```
 
-`preserve_thinking: true` est **essentiel** pour les modèles avec mode réflexion (comme Qwen3). Sans ça, le contenu de réflexion (`<think>...</think>`) est silencieusement supprimé dans les réponses API.
+`preserve_thinking: true` is **essential** for models with a thinking/reasoning mode (like Qwen3). Without it, thinking content (`<think>...</think>`) is silently stripped from API responses.
 
 ---
 
-## Paramètres serveur
+## Server Parameters
 
-### `--host <adresse>` — Adresse d'écoute
-
-```bash
---host 0.0.0.0   # Écoute sur toutes les interfaces (accès réseau)
---host 127.0.0.1 # Écoute en local uniquement
-```
-
-### `--port <port>` — Port d'écoute
+### `--host <address>` — Listen address
 
 ```bash
---port 8081    # Port personnalisé
---port 8001    # Autre port
+--host 0.0.0.0   # Listen on all interfaces (network access)
+--host 127.0.0.1 # Local only
 ```
 
-### `--fit` — Ajuster automatiquement les ressources
+### `--port <port>` — Listen port
 
 ```bash
---fit on    # Ajuste automatiquement les paramètres si la VRAM est insuffisante
+--port 8081    # Custom port
+--port 8001    # Another port
 ```
 
-Désactive les options qui causent des OOM au démarrage. Très pratique pour ne pas avoir à ajuster manuellement.
+### `--fit` — Auto-adjust resources
+
+```bash
+--fit on    # Automatically adjusts parameters if VRAM is insufficient
+```
+
+Disables options that cause OOM at startup. Very convenient to avoid manual tuning.
 
 ---
 
-## Paramètres de performance
+## Performance Parameters
 
 ### `-fa, --flash-attn` — Flash Attention
 
 ```bash
--fa on    # Active Flash Attention
+-fa on    # Enable Flash Attention
 ```
 
-**Flash Attention** est une optimisation algorithmique de l'attention qui :
-- Réduit la complexité mémoire de O(n²) à O(n)
-- Accélère le traitement des longs contextes
-- Est **indispensable** pour les contextes > 32k tokens
-- Compatible uniquement avec les GPU NVIDIA (CUDA)
+**Flash Attention** is an algorithmic optimization of the attention mechanism that:
+- Reduces memory complexity from O(n²) to O(n)
+- Accelerates long-context processing
+- Is **essential** for contexts > 32k tokens
+- Only compatible with NVIDIA GPUs (CUDA)
 
-**Gain typique** : 20-40% plus rapide sur les longs contextes, réduction significative de la VRAM.
+**Typical gain**: 20-40% faster on long contexts, significant VRAM reduction.
 
-### `-t, --threads <n>` — Nombre de threads CPU
+### `-t, --threads <n>` — Number of CPU threads
 
 ```bash
--t 8    # 8 threads CPU pour le traitement hors-GPU
+-t 8    # 8 CPU threads for non-GPU processing
 ```
 
-Même avec un GPU, les parties non offloadées utilisent le CPU. Le nombre optimal correspond généralement au nombre de cœurs physiques.
+Even with a GPU, non-offloaded parts use the CPU. Optimal number usually matches physical cores.
 
-### `-b, --batch-size <n>` — Taille de batch pour le préremplissage
+### `-b, --batch-size <n>` — Batch size for prefill
 
 ```bash
--b 512   # Batch de 512 tokens pour le prompt processing
+-b 512   # Batch of 512 tokens for prompt processing
 ```
 
-Une taille plus grande accélère le préremplissage mais consomme plus de VRAM temporairement.
+Larger sizes speed up prefill but temporarily consume more VRAM.
 
 ---
 
-## Fonctionnement interne
+## Internal Mechanics
 
-### Cycle de vie d'une requête
-
-```
-1. Client envoie POST /v1/chat/completions
-2. llama-server tokenize le prompt
-3. Prompt processing (préremplissage) :
-   - Tous les tokens du prompt sont traités en parallèle
-   - Le cache KV est rempli
-   - Flash Attention accélère cette étape
-4. Génération token par token :
-   - Le modèle sélectionne les experts MoE actifs pour ce token
-   - Le cache KV est consulté pour le contexte
-   - Un token est généré
-5. Le token est renvoyé (streaming ou non)
-6. Retour à l'étape 4 jusqu'à fin de génération
-```
-
-### Mémoire VRAM — Comment c'est réparti
-
-Sur une RTX 4070 12GB avec Qwen3.6-35B-A3B (Q4_K_M) :
+### Request Lifecycle
 
 ```
-VRAM totale : 12 GB
-├── Poids du modèle : ~6.5 GB
-│   ├── Couches principales (GPU) : ~4 GB
-│   └── Experts MoE (25 sur GPU) : ~2.5 GB
-├── Cache KV (Q8_0, 128k) : ~4-8 GB (croît avec le contexte)
-└── Overhead CUDA : ~0.5 GB
+1. Client sends POST /v1/chat/completions
+2. llama-server tokenizes the prompt
+3. Prompt processing (prefill):
+   - All prompt tokens are processed in parallel
+   - KV cache is populated
+   - Flash Attention accelerates this step
+4. Token-by-token generation:
+   - Model selects active MoE experts for this token
+   - KV cache is consulted for context
+   - One token is generated
+5. Token is returned (streaming or not)
+6. Return to step 4 until generation ends
 ```
 
-> Le cache KV croît dynamiquement avec la conversation. C'est pourquoi la VRAM varie entre 6.5 et 10.6 GB.
+### VRAM Layout
 
-### Les experts MoE en détail
-
-Un modèle MoE à 35B paramètres avec 64 experts n'active que quelques experts (8 dans le cas de Qwen3.6) par token :
+On an RTX 4070 12GB with Qwen3.6-35B-A3B (Q4_K_M):
 
 ```
-Token "Bonjour" → Expert sélectionné : [3, 17, 22, 31, 45, 51, 58, 61]
-Token "le"      → Expert sélectionné : [3, 12, 22, 31, 40, 45, 55, 58]
-Token "monde"   → Expert sélectionné : [5, 17, 22, 31, 45, 50, 58, 63]
-                     ↑                    ↑
-                     Experts fréquents    Experts spécifiques au contexte
+Total VRAM : 12 GB
+├── Model weights : ~6.5 GB
+│   ├── Main layers (GPU) : ~4 GB
+│   └── MoE experts (25 on GPU) : ~2.5 GB
+├── KV cache (Q8_0, 128k) : ~4-8 GB (grows with context)
+└── CUDA overhead : ~0.5 GB
 ```
 
-**L'avantage MoE** : Seuls les experts activés sont calculés → 35B params mais seulement ~8B calculés par token (A3B = Active 3B).
+> The KV cache grows dynamically with the conversation. This is why VRAM varies between 6.5 and 10.6 GB.
+
+### MoE Experts in Detail
+
+A 35B parameter MoE model with 64 experts only activates a few (8 for Qwen3.6) per token:
+
+```
+Token "Hello"  → Selected experts : [3, 17, 22, 31, 45, 51, 58, 61]
+Token "world"  → Selected experts : [3, 12, 22, 31, 40, 45, 55, 58]
+Token "today"  → Selected experts : [5, 17, 22, 31, 45, 50, 58, 63]
+                    ↑                    ↑
+                    Frequent experts     Context-specific experts
+```
+
+**MoE advantage**: Only activated experts are computed → 35B params but only ~8B computed per token (A3B = Active 3B).
 
 ---
 
-## Cas pratique : Qwen3.6-35B-A3B
+## Practical Example: Qwen3.6-35B-A3B
 
-### Commande recommandée (RTX 4070 12GB)
+### Recommended Command (RTX 4070 12GB)
 
 ```bash
 llama-server \
@@ -407,58 +409,58 @@ llama-server \
   --chat-template-kwargs '{"preserve_thinking": true}'
 ```
 
-### Explication de chaque flag
+### Flag-by-flag Explanation
 
-| Flag | Pourquoi |
-|------|----------|
-| `-ngl 999` | Toutes les couches sur GPU pour max perfs |
-| `-ncmoe 25` | 25 experts MoE en VRAM — sweet spot pour 12GB |
-| `-fa on` | Flash Attention indispensable pour 128k |
-| `--cache-type-k/v q8_0` | Cache KV en Q8 — divise par 2 la VRAM, qualité préservée |
-| `-c 131072` | Contexte 128k complet |
-| `-t 8` | 8 threads CPU pour les parties non-GPU |
-| `--no-context-shift` | Pas de glissement silencieux du contexte |
-| `--temp 0.6` | Créativité modérée, bon pour le coding |
-| `--top-p 0.95 --top-k 20` | Sampling conservateur |
-| `--repeat-penalty 1.00` | Pas de pénalité — le MoE gère sa structure |
-| `--presence-penalty 0.00` | Pas de biais de diversité |
-| `--fit on` | Ajustement auto si VRAM insuffisante |
-| `--chat-template-kwargs '{"preserve_thinking": true}'` | Préserve les blocs de réflexion |
+| Flag | Why |
+|------|-----|
+| `-ngl 999` | All layers on GPU for max performance |
+| `-ncmoe 25` | 25 MoE experts in VRAM — sweet spot for 12GB |
+| `-fa on` | Flash Attention essential for 128k |
+| `--cache-type-k/v q8_0` | Q8 KV cache — halves VRAM, preserves quality |
+| `-c 131072` | Full 128k context |
+| `-t 8` | 8 CPU threads for non-GPU parts |
+| `--no-context-shift` | No silent context sliding |
+| `--temp 0.6` | Moderate creativity, good for coding |
+| `--top-p 0.95 --top-k 20` | Conservative sampling |
+| `--repeat-penalty 1.00` | No penalty — MoE manages its structure |
+| `--presence-penalty 0.00` | No diversity bias |
+| `--fit on` | Auto-adjust if VRAM insufficient |
+| `--chat-template-kwargs '{"preserve_thinking": true}'` | Preserve thinking blocks |
 
-### Résultats attendus
+### Expected Results
 
-| Métrique | Valeur |
-|----------|--------|
-| Vitesse de génération | 58-62 tok/s |
-| VRAM (contexte vide) | ~6.5 GB |
-| VRAM (contexte plein 128k) | ~10.6 GB |
+| Metric | Value |
+|--------|-------|
+| Generation speed | 58-62 tok/s |
+| VRAM (empty context) | ~6.5 GB |
+| VRAM (full 128k context) | ~10.6 GB |
 | Prompt processing | ~2000 tok/s |
 
 ---
 
-## Dépannage
+## Troubleshooting
 
-### OOM (Out of Memory) CUDA
+### CUDA OOM (Out of Memory)
 
 ```
 CUDA error: out of memory
 ```
 
-Solutions (dans l'ordre) :
-1. Réduire `-ncmoe` (ex: 15 au lieu de 25)
-2. Réduire `-c` (ex: 65536 au lieu de 131072)
-3. Passer le cache KV en `q4_0` (dégradation de qualité)
-4. Réduire `-ngl` (ex: 80 au lieu de 999)
+Solutions (in order):
+1. Reduce `-ncmoe` (e.g., 15 instead of 25)
+2. Reduce `-c` (e.g., 65536 instead of 131072)
+3. Switch KV cache to `q4_0` (quality degradation)
+4. Reduce `-ngl` (e.g., 80 instead of 999)
 
-### Modèle lent
+### Slow Model
 
-- Vérifier que `-fa on` est activé
-- Vérifier que `-ngl 999` est utilisé
-- Vérifier les threads CPU : `-t` doit correspondre aux cœurs physiques
-- Vérifier que CUDA est bien utilisé : `nvidia-smi` doit montrer l'utilisation GPU
+- Verify `-fa on` is enabled
+- Verify `-ngl 999` is used
+- Check CPU threads: `-t` should match physical cores
+- Verify CUDA is actually used: `nvidia-smi` should show GPU utilization
 
-### Contexte tronqué
+### Truncated Context
 
-- Vérifier `-c 131072` dans la commande
-- Vérifier `--no-context-shift` pour éviter les coupures silencieuses
-- Augmenter `--cache-type` si la qualité se dégrade en fin de contexte
+- Verify `-c 131072` in the command
+- Verify `--no-context-shift` to prevent silent truncation
+- Increase `--cache-type` if quality degrades at end of context
