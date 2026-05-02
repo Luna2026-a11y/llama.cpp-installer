@@ -30,6 +30,8 @@ llama-server \
   --model ~/models/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf \
   --port 8001 \
   --alias qwen3.6-35b-a3b \
+  -ngl 999 \
+  -ncmoe 0 \
   -c 131072 \
   -n 32768 \
   --no-context-shift \

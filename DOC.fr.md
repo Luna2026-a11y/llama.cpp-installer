@@ -150,35 +150,39 @@ Utile uniquement avec plusieurs GPUs NVIDIA.
 
 ## Paramètres MoE (Mixture of Experts)
 
-### `-ncmoe, --n-cmoe-offload <n>` — Nombre d'experts MoE sur le GPU
+### `-ncmoe, --n-cpu-moe <n>` — Nombre de couches MoE à garder sur le CPU
 
-**C'est le paramètre clé pour les modèles MoE sur GPU limité.**
+**Paramètre clé pour les modèles MoE sur VRAM limité.**
 
-Les modèles MoE (comme Qwen3.6-35B-A3B, Mixtral, DeepSeek) ont plusieurs "experts" par couche, mais n'en activent que quelques-uns par token. Le défi : tous les experts doivent être en mémoire pour choisir lesquels activer.
+Les modèles MoE (comme Qwen3.6-35B-A3B, Mixtral, DeepSeek) ont plusieurs « experts » par couche, mais n'en activent que quelques-uns par token. Le défi : tous les experts doivent être en mémoire pour choisir lesquels activer.
 
-Le flag `-ncmoe` contrôle combien d'experts sont chargés sur le GPU :
+Le flag `-ncmoe` contrôle combien de **couches MoE** restent sur le **CPU** (déchargées du GPU). Plus la valeur est élevée = plus de couches MoE sur le CPU = moins de VRAM, mais plus lent :
 
 ```bash
--ncmoe 25   # 25 experts sur GPU — sweet spot pour 12GB VRAM
--ncmoe 0    # Aucun expert MoE sur GPU (tous en RAM)
+-ncmoe 0     # Toutes les couches MoE sur le GPU — plus rapide, mais nécessite plus de VRAM
+-ncmoe 25    # 25 couches MoE sur le CPU — sweet spot pour 12GB VRAM
+-ncmoe 999   # Toutes les couches MoE sur le CPU (équivalent à --cpu-moe)
 ```
+
+> **Note** : La forme longue est `--n-cpu-moe`, ce qui rend le sens clair : N couches de poids MoE gardés sur le **CPU**.
 
 **Comment ça marche** :
 
 1. Le modèle MoE a N experts par couche (e.g., 64 experts pour Qwen3.6)
 2. À chaque token, seuls quelques experts sont activés (e.g., 8 sur 64)
 3. Mais TOUS les experts doivent être accessibles pour la sélection
-4. `-ncmoe 25` garde les 25 premiers experts en VRAM, le reste en RAM système
-5. Les experts les plus fréquemment utilisés sont privilégiés sur le GPU
+4. `-ncmoe 25` garde les 25 premières couches MoE sur le CPU, le reste sur le GPU
+5. Cela réduit l'utilisation VRAM au détriment d'un accès plus lent aux couches déchargées
 
 **Impact sur les performances** :
 
 | Valeur | VRAM | Vitesse | Recommandation |
 |--------|------|---------|----------------|
-| `-ncmoe 0` | ~4 GB | 25-30 tok/s | GPU très limité |
-| `-ncmoe 25` | ~6.5-10.6 GB | 58-62 tok/s | **RTX 4070 12GB** ★ |
-| `-ncmoe 50` | ~14 GB | 60-65 tok/s | RTX 4070 Ti 16GB |
-| Tous sur GPU | ~20+ GB | 65+ tok/s | RTX 4090 24GB |
+| `-ncmoe 0` | ~10.5 Go | 60-65 tok/s | Tient confortablement en 12 Go ★ |
+| `-ncmoe 25` | ~6.5-10 Go | 50-58 tok/s | VRAM serrée 12 Go / marge de sécurité |
+| `-ncmoe 999` / `--cpu-moe` | ~4 Go | 25-30 tok/s | GPU très limité |
+
+> **Astuce** : Avec `--fit on`, llama-server ajuste automatiquement le déchargement MoE si la VRAM est insuffisante. Commencez avec `-ncmoe 0` et laissez `--fit on` gérer.
 
 ---
 
@@ -367,12 +371,12 @@ Sur une RTX 4070 12GB avec Qwen3.6-35B-A3B (Q4_K_M) :
 VRAM totale : 12 GB
 ├── Poids du modèle : ~6.5 GB
 │   ├── Couches principales (GPU) : ~4 GB
-│   └── Experts MoE (25 sur GPU) : ~2.5 GB
+│   └── Experts MoE (tous sur GPU avec -ncmoe 0) : ~2.5 GB
 ├── Cache KV (Q8_0, 128k) : ~4-8 GB (croît avec le contexte)
 └── Overhead CUDA : ~0.5 GB
 ```
 
-> Le cache KV croît dynamiquement avec la conversation. C'est pourquoi la VRAM varie entre 6.5 et 10.6 GB.
+> Avec `-ncmoe 0`, toutes les couches MoE sont sur le GPU pour la vitesse max. Si la VRAM est serrée, utilisez `-ncmoe 25` pour décharger 25 couches MoE sur le CPU.
 
 ### Les experts MoE en détail
 
@@ -399,7 +403,7 @@ llama-server \
   -m models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf \
   --alias qwen35b \
   --host 0.0.0.0 --port 8081 \
-  -ngl 999 -ncmoe 25 -fa on \
+  -ngl 999 -ncmoe 0 -fa on \
   --cache-type-k q8_0 --cache-type-v q8_0 \
   -c 131072 -t 8 \
   --no-context-shift \
@@ -413,8 +417,8 @@ llama-server \
 
 | Flag | Pourquoi |
 |------|----------|
-| `-ngl 999` | Toutes les couches sur GPU pour max perfs |
-| `-ncmoe 25` | 25 experts MoE en VRAM — sweet spot pour 12GB |
+| `-ngl 999` | Toutes les couches sur le GPU pour max perfs |
+| `-ncmoe 0` | Toutes les couches MoE sur le GPU — plus rapide (utiliser avec `--fit on` pour la sécurité) |
 | `-fa on` | Flash Attention indispensable pour 128k |
 | `--cache-type-k/v q8_0` | Cache KV en Q8 — divise par 2 la VRAM, qualité préservée |
 | `-c 131072` | Contexte 128k complet |
@@ -447,7 +451,7 @@ CUDA error: out of memory
 ```
 
 Solutions (dans l'ordre) :
-1. Réduire `-ncmoe` (ex: 15 au lieu de 25)
+1. Augmenter `-ncmoe` (ex: `-ncmoe 25` pour décharger les couches MoE sur le CPU et réduire la VRAM)
 2. Réduire `-c` (ex: 65536 au lieu de 131072)
 3. Passer le cache KV en `q4_0` (dégradation de qualité)
 4. Réduire `-ngl` (ex: 80 au lieu de 999)

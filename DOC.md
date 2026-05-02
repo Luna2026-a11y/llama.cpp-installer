@@ -150,35 +150,39 @@ Only useful with multiple NVIDIA GPUs.
 
 ## MoE Parameters (Mixture of Experts)
 
-### `-ncmoe, --n-cmoe-offload <n>` — Number of MoE experts on GPU
+### `-ncmoe, --n-cpu-moe <n>` — Number of MoE layers to keep on CPU
 
-**This is the key parameter for MoE models on limited GPUs.**
+**Key parameter for MoE models on limited VRAM.**
 
 MoE models (like Qwen3.6-35B-A3B, Mixtral, DeepSeek) have multiple "experts" per layer, but only activate a few per token. The challenge: all experts must be in memory to select which ones to activate.
 
-The `-ncmoe` flag controls how many experts are loaded on the GPU:
+The `-ncmoe` flag controls how many **MoE layers** stay on the **CPU** (offloaded from GPU). Higher values = more MoE layers on CPU = less VRAM used, but slower:
 
 ```bash
--ncmoe 25   # 25 experts on GPU — sweet spot for 12GB VRAM
--ncmoe 0    # No MoE experts on GPU (all in system RAM)
+-ncmoe 0     # All MoE layers on GPU — fastest, but needs more VRAM
+-ncmoe 25    # 25 MoE layers on CPU — sweet spot for 12GB VRAM
+-ncmoe 999   # All MoE layers on CPU (equivalent to --cpu-moe)
 ```
+
+> **Note**: The long form is `--n-cpu-moe`, which makes the meaning clear: N layers of MoE weights kept on **CPU**.
 
 **How it works**:
 
 1. The MoE model has N experts per layer (e.g., 64 for Qwen3.6)
 2. At each token, only a few experts are activated (e.g., 8 out of 64)
 3. But ALL experts must be accessible for selection
-4. `-ncmoe 25` keeps the first 25 experts in VRAM, the rest in system RAM
-5. Most frequently used experts are prioritized on the GPU
+4. `-ncmoe 25` keeps the first 25 MoE layers on CPU, the rest on GPU
+5. This reduces VRAM usage at the cost of slower expert access for offloaded layers
 
 **Performance impact**:
 
 | Value | VRAM | Speed | Recommendation |
 |-------|------|-------|----------------|
-| `-ncmoe 0` | ~4 GB | 25-30 tok/s | Very limited GPU |
-| `-ncmoe 25` | ~6.5-10.6 GB | 58-62 tok/s | **RTX 4070 12GB** ★ |
-| `-ncmoe 50` | ~14 GB | 60-65 tok/s | RTX 4070 Ti 16GB |
-| All on GPU | ~20+ GB | 65+ tok/s | RTX 4090 24GB |
+| `-ncmoe 0` | ~10.5 GB | 60-65 tok/s | Fits 12GB VRAM comfortably ★ |
+| `-ncmoe 25` | ~6.5-10 GB | 50-58 tok/s | Tight 12GB VRAM / safety margin |
+| `-ncmoe 999` / `--cpu-moe` | ~4 GB | 25-30 tok/s | Very limited GPU |
+
+> **Tip**: With `--fit on`, llama-server will automatically adjust MoE offloading if VRAM is insufficient. Start with `-ncmoe 0` and let `--fit on` handle it.
 
 ---
 
@@ -367,12 +371,12 @@ On an RTX 4070 12GB with Qwen3.6-35B-A3B (Q4_K_M):
 Total VRAM : 12 GB
 ├── Model weights : ~6.5 GB
 │   ├── Main layers (GPU) : ~4 GB
-│   └── MoE experts (25 on GPU) : ~2.5 GB
+│   └── MoE experts (all on GPU with -ncmoe 0) : ~2.5 GB
 ├── KV cache (Q8_0, 128k) : ~4-8 GB (grows with context)
 └── CUDA overhead : ~0.5 GB
 ```
 
-> The KV cache grows dynamically with the conversation. This is why VRAM varies between 6.5 and 10.6 GB.
+> With `-ncmoe 0`, all MoE layers are on GPU for max speed. If VRAM is tight, use `-ncmoe 25` to offload 25 MoE layers to CPU.
 
 ### MoE Experts in Detail
 
@@ -399,7 +403,7 @@ llama-server \
   -m models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf \
   --alias qwen35b \
   --host 0.0.0.0 --port 8081 \
-  -ngl 999 -ncmoe 25 -fa on \
+  -ngl 999 -ncmoe 0 -fa on \
   --cache-type-k q8_0 --cache-type-v q8_0 \
   -c 131072 -t 8 \
   --no-context-shift \
@@ -414,7 +418,7 @@ llama-server \
 | Flag | Why |
 |------|-----|
 | `-ngl 999` | All layers on GPU for max performance |
-| `-ncmoe 25` | 25 MoE experts in VRAM — sweet spot for 12GB |
+| `-ncmoe 0` | All MoE layers on GPU — fastest (use with `--fit on` for safety) |
 | `-fa on` | Flash Attention essential for 128k |
 | `--cache-type-k/v q8_0` | Q8 KV cache — halves VRAM, preserves quality |
 | `-c 131072` | Full 128k context |
@@ -447,7 +451,7 @@ CUDA error: out of memory
 ```
 
 Solutions (in order):
-1. Reduce `-ncmoe` (e.g., 15 instead of 25)
+1. Increase `-ncmoe` (e.g., `-ncmoe 25` to offload MoE layers to CPU, reducing VRAM)
 2. Reduce `-c` (e.g., 65536 instead of 131072)
 3. Switch KV cache to `q4_0` (quality degradation)
 4. Reduce `-ngl` (e.g., 80 instead of 999)
