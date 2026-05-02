@@ -2,6 +2,8 @@
 
 Script d'installation automatique de llama.cpp avec support CUDA pour Ubuntu/Pop!_OS.
 
+> **Compatibilité** : Linux uniquement. Testé sous Pop!_OS 24.04.
+
 ## Ce que fait le script
 
 - Met à jour le système
