@@ -204,6 +204,10 @@ print(response.json())
 
 See [DOC.md](DOC.md) for the complete parameter reference.
 
+## Going Further
+
+This installer gets llama.cpp running on your machine. For **production-grade serving** — multi-engine configs (vLLM, SGLang), benchmarked Docker Compose recipes, Genesis patches, and workload-specific tuning — check out [club-3090](https://github.com/noonghunna/club-3090). It's the reference for running LLMs on consumer GPUs with measured TPS, VRAM budgets, and stress-tested configs.
+
 ## Author
 
 Issa Issa

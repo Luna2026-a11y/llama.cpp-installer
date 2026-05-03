@@ -204,6 +204,10 @@ print(response.json())
 
 Voir [DOC.fr.md](DOC.fr.md) pour la référence complète des paramètres.
 
+## Pour aller plus loin
+
+Cet installateur permet de faire tourner llama.cpp sur votre machine. Pour du **serving de niveau production** — configs multi-moteur (vLLM, SGLang), recettes Docker Compose benchmarquées, patches Genesis, et tuning par workload — consultez [club-3090](https://github.com/noonghunna/club-3090). C'est la référence pour faire tourner des LLMs sur des GPUs grand public avec des TPS mesurés, des budgets VRAM, et des configs testées en conditions réelles.
+
 ## Auteur
 
 Issa Issa
