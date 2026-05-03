@@ -1,7 +1,30 @@
-*.bin
+# Build artifacts
+build/
+*.o
+*.a
+
+# Model files (large, downloaded separately)
 *.gguf
 *.ggml
-build/
+*.bin
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+.venv/
+
+# Environment
 .env
+.env.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
